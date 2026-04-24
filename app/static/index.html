@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenAI Audio Demo</title>
+    <style>
+      :root {
+        --bg: #eef3ef;
+        --panel: rgba(255, 255, 255, 0.82);
+        --ink: #18231f;
+        --muted: #57645e;
+        --accent: #287c6f;
+        --accent-dark: #135348;
+        --line: rgba(24, 35, 47, 0.12);
+        --soft: rgba(40, 124, 111, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: Georgia, "Times New Roman", serif;
+        color: var(--ink);
+        background:
+          linear-gradient(120deg, rgba(40, 124, 111, 0.16), transparent 32%),
+          linear-gradient(240deg, rgba(50, 76, 114, 0.14), transparent 30%),
+          linear-gradient(135deg, #f8faf7 0%, var(--bg) 46%, #e6ede8 100%);
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+
+      .shell {
+        width: min(1100px, 100%);
+        background: var(--panel);
+        backdrop-filter: blur(14px);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        box-shadow: 0 28px 90px rgba(24, 35, 47, 0.12);
+        overflow: hidden;
+      }
+
+      .hero {
+        padding: 32px 32px 12px;
+      }
+
+      .eyebrow {
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        font-size: 12px;
+        color: var(--accent-dark);
+        margin: 0 0 10px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 3rem;
+        line-height: 0.95;
+      }
+
+      .lead {
+        margin: 16px 0 0;
+        max-width: 48ch;
+        color: var(--muted);
+        font-size: 1.05rem;
+        line-height: 1.6;
+      }
+
+      .tools {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 0;
+        padding: 12px 32px 32px;
+      }
+
+      .tool {
+        display: grid;
+        align-content: start;
+        gap: 16px;
+        padding: 24px;
+        border-top: 1px solid var(--line);
+      }
+
+      .tool + .tool {
+        border-left: 1px solid var(--line);
+      }
+
+      .tool h2 {
+        margin: 0;
+        font-size: 1.35rem;
+      }
+
+      .tool-form {
+        display: grid;
+        gap: 16px;
+      }
+
+      label {
+        display: grid;
+        gap: 8px;
+        font-size: 0.95rem;
+      }
+
+      .label-text {
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      textarea,
+      select,
+      input {
+        width: 100%;
+        border: 1px solid rgba(24, 35, 47, 0.12);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.8);
+        color: var(--ink);
+        padding: 14px 16px;
+        font: inherit;
+      }
+
+      textarea {
+        min-height: 160px;
+        resize: vertical;
+      }
+
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 14px 22px;
+        font: inherit;
+        font-weight: 700;
+        color: white;
+        cursor: pointer;
+        background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+        width: fit-content;
+      }
+
+      button:disabled {
+        opacity: 0.7;
+        cursor: wait;
+      }
+
+      .status {
+        min-height: 24px;
+        color: var(--muted);
+      }
+
+      .player {
+        display: grid;
+        gap: 10px;
+      }
+
+      .player[hidden],
+      .transcript[hidden] {
+        display: none;
+      }
+
+      audio {
+        width: 100%;
+      }
+
+      a.download {
+        color: var(--accent-dark);
+      }
+
+      .transcript {
+        display: grid;
+        gap: 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--soft);
+        padding: 14px;
+      }
+
+      .transcript-output {
+        margin: 0;
+        white-space: pre-wrap;
+        line-height: 1.55;
+      }
+
+      @media (max-width: 640px) {
+        .hero {
+          padding-left: 20px;
+          padding-right: 20px;
+        }
+
+        .tools {
+          grid-template-columns: 1fr;
+          padding: 12px 20px 24px;
+        }
+
+        .tool {
+          padding: 20px 0;
+        }
+
+        .tool + .tool {
+          border-left: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">LiteLLM OpenAI Audio</p>
+        <h1>Audio tools</h1>
+        <p class="lead">
+          Generate MP3 speech from text and transcribe uploaded audio through the same
+          LiteLLM-compatible OpenAI endpoint.
+        </p>
+      </section>
+
+      <section class="tools">
+        <section class="tool">
+          <h2>Generate speech</h2>
+          <form class="tool-form" id="tts-form">
+            <label>
+              <span class="label-text">Text</span>
+              <textarea id="text" name="text" required>Your text to convert to speech here</textarea>
+            </label>
+
+            <label>
+              <span class="label-text">Voice</span>
+              <select id="voice" name="voice">
+                <option value="alloy">alloy</option>
+                <option value="ash">ash</option>
+                <option value="ballad">ballad</option>
+                <option value="coral">coral</option>
+                <option value="echo">echo</option>
+                <option value="fable">fable</option>
+                <option value="nova">nova</option>
+                <option value="onyx">onyx</option>
+                <option value="sage">sage</option>
+                <option value="shimmer">shimmer</option>
+              </select>
+            </label>
+
+            <button id="submit" type="submit">Create MP3</button>
+            <p class="status" id="status"></p>
+
+            <section class="player" id="player" hidden>
+              <audio id="audio" controls></audio>
+              <a id="download" class="download" download="speech.mp3">Download speech.mp3</a>
+            </section>
+          </form>
+        </section>
+
+        <section class="tool">
+          <h2>Transcribe audio</h2>
+          <form class="tool-form" id="transcribe-form">
+            <label>
+              <span class="label-text">Audio file</span>
+              <input id="audio-file" name="file" type="file" accept="audio/*" required />
+            </label>
+
+            <button id="transcribe-submit" type="submit">Transcribe</button>
+            <p class="status" id="transcribe-status"></p>
+
+            <section class="transcript" id="transcript" hidden>
+              <span class="label-text">Transcript</span>
+              <p class="transcript-output" id="transcript-output"></p>
+            </section>
+          </form>
+        </section>
+      </section>
+    </main>
+
+    <script>
+      const form = document.getElementById("tts-form");
+      const submitButton = document.getElementById("submit");
+      const status = document.getElementById("status");
+      const player = document.getElementById("player");
+      const audio = document.getElementById("audio");
+      const download = document.getElementById("download");
+      const transcribeForm = document.getElementById("transcribe-form");
+      const transcribeButton = document.getElementById("transcribe-submit");
+      const transcribeStatus = document.getElementById("transcribe-status");
+      const transcript = document.getElementById("transcript");
+      const transcriptOutput = document.getElementById("transcript-output");
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        submitButton.disabled = true;
+        player.hidden = true;
+        status.textContent = "Generating audio...";
+
+        const body = {
+          text: document.getElementById("text").value,
+          voice: document.getElementById("voice").value,
+        };
+
+        try {
+          const response = await fetch("/api/tts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({ detail: "Request failed." }));
+            throw new Error(error.detail || "Request failed.");
+          }
+
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          audio.src = url;
+          download.href = url;
+          player.hidden = false;
+          status.textContent = "Audio ready.";
+        } catch (error) {
+          status.textContent = error.message;
+        } finally {
+          submitButton.disabled = false;
+        }
+      });
+
+      transcribeForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        transcribeButton.disabled = true;
+        transcript.hidden = true;
+        transcriptOutput.textContent = "";
+        transcribeStatus.textContent = "Transcribing...";
+
+        const data = new FormData(transcribeForm);
+
+        try {
+          const response = await fetch("/api/transcribe", {
+            method: "POST",
+            body: data,
+          });
+
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({ detail: "Request failed." }));
+            throw new Error(error.detail || "Request failed.");
+          }
+
+          const result = await response.json();
+          transcriptOutput.textContent = result.text || "";
+          transcript.hidden = false;
+          transcribeStatus.textContent = "Transcript ready.";
+        } catch (error) {
+          transcribeStatus.textContent = error.message;
+        } finally {
+          transcribeButton.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
