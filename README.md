@@ -1,6 +1,8 @@
-# LiteLLM Audio Demo
+# LiteLLM Playground
 
-Small FastAPI app that uses `openai.OpenAI` against a LiteLLM/OpenAI-compatible endpoint and serves a browser UI for text-to-speech and audio transcription.
+Small FastAPI app that uses `openai.OpenAI` against a LiteLLM/OpenAI-compatible endpoint and serves a tabbed browser UI for chat (streaming), text-to-speech, and audio transcription.
+
+![LiteLLM Playground — chat tab streaming a reply from claude-haiku-4-5](docs/test-webpage.png)
 
 ## Why this shape
 
@@ -29,7 +31,6 @@ OPENAI_TTS_MODEL=gpt-4o-mini-tts
 OPENAI_TRANSCRIBE_MODEL=gpt-4o-transcribe
 ```
 
-The key shown in your original message should be treated as exposed. Rotate it before using this app.
 
 ## Run locally with uv
 
@@ -67,6 +68,67 @@ Expected response:
 ```
 
 ## Equivalent Python usage
+
+Chat completion:
+
+```python
+import os
+import openai
+
+client = openai.OpenAI(
+    api_key="your-real-key",
+    base_url=os.environ["OPENAI_BASE_URL"],
+)
+
+response = client.chat.completions.create(
+    model="claude-haiku-4-5",
+    messages=[
+        {"role": "system", "content": "You are a terse assistant."},
+        {"role": "user", "content": "Name a primary color."},
+    ],
+)
+
+print(response.choices[0].message.content)
+```
+
+Streaming chat completion:
+
+```python
+import os
+import openai
+
+client = openai.OpenAI(
+    api_key="your-real-key",
+    base_url=os.environ["OPENAI_BASE_URL"],
+)
+
+stream = client.chat.completions.create(
+    model="gpt-5.5",
+    messages=[{"role": "user", "content": "Write a 3-line haiku about streaming."}],
+    stream=True,
+)
+
+for chunk in stream:
+    delta = chunk.choices[0].delta.content if chunk.choices else None
+    if delta:
+        print(delta, end="", flush=True)
+print()
+```
+
+List available models:
+
+```python
+import os
+import openai
+
+client = openai.OpenAI(
+    api_key="your-real-key",
+    base_url=os.environ["OPENAI_BASE_URL"],
+)
+
+for model in client.models.list().data:
+    print(model.id)
+```
 
 Text-to-speech:
 
@@ -109,9 +171,18 @@ response = client.audio.transcriptions.create(
 print(response.text)
 ```
 
+## Endpoints
+
+| Method | Path | Returns |
+| --- | --- | --- |
+| GET  | `/health` | `{"status":"ok"}` |
+| GET  | `/api/models` | `{"models": [...]}` — chat-capable models from the proxy |
+| POST | `/api/chat` | streaming `text/plain` deltas; body `{"model","messages":[{"role","content"}]}` |
+| POST | `/api/tts` | MP3 bytes; body `{"text","voice"}` |
+| POST | `/api/transcribe` | `{"text": ...}`; multipart `file` upload |
+
 ## Notes
 
-- The app returns MP3 bytes from `/api/tts`.
-- The app returns transcript JSON from `/api/transcribe`.
-- The frontend lets you choose a built-in voice.
-- OpenAI’s current text-to-speech docs show `gpt-4o-mini-tts` on the speech endpoint and list `alloy` among the supported voices.
+- The frontend is a single static page with three tabs (Chat / Speech / Transcribe).
+- Chat streams via `response.body.getReader()` against `/api/chat`. Conversation history is kept client-side.
+- OpenAI's current text-to-speech docs show `gpt-4o-mini-tts` on the speech endpoint and list `alloy` among the supported voices.

@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+
 from fastapi.testclient import TestClient
 
 import app.main as main
@@ -13,14 +15,17 @@ def test_health_endpoint() -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_index_serves_form() -> None:
+def test_index_serves_playground() -> None:
     client = TestClient(app)
 
     response = client.get("/")
 
     assert response.status_code == 200
-    assert "Generate speech" in response.text
-    assert "Transcribe audio" in response.text
+    body = response.text
+    assert "LiteLLM Playground" in body
+    assert 'data-tab="chat"' in body
+    assert 'data-tab="speech"' in body
+    assert 'data-tab="transcribe"' in body
 
 
 def test_tts_endpoint_returns_audio_bytes(monkeypatch) -> None:
@@ -58,3 +63,56 @@ def test_transcribe_endpoint_returns_text(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"text": "hello transcript"}
+
+
+def test_models_endpoint_returns_list(monkeypatch) -> None:
+    monkeypatch.setattr(main, "list_chat_models", lambda: ["gpt-5.5", "claude-haiku-4-5"])
+    client = TestClient(app)
+
+    response = client.get("/api/models")
+
+    assert response.status_code == 200
+    assert response.json() == {"models": ["gpt-5.5", "claude-haiku-4-5"]}
+
+
+def test_chat_endpoint_streams_text(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_stream_chat(*, model: str, messages: list[dict[str, str]]) -> Iterator[str]:
+        captured["model"] = model
+        captured["messages"] = messages
+        yield "Hel"
+        yield "lo!"
+
+    monkeypatch.setattr(main, "stream_chat", fake_stream_chat)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "model": "claude-haiku-4-5",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert response.text == "Hello!"
+    assert captured == {
+        "model": "claude-haiku-4-5",
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+
+
+def test_chat_endpoint_rejects_invalid_role() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "model": "claude-haiku-4-5",
+            "messages": [{"role": "bogus", "content": "hi"}],
+        },
+    )
+
+    assert response.status_code == 422
