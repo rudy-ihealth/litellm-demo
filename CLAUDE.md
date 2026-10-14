@@ -18,11 +18,12 @@ docker compose up --build                                      # container run (
 
 FastAPI app proxying an OpenAI-compatible endpoint (LiteLLM/Azure) for TTS + transcription. Single container serves both JSON API and static frontend on port 8000.
 
-- [app/main.py](app/main.py) — FastAPI routes. `/health`, `/` (serves [app/static/index.html](app/static/index.html)), `POST /api/tts` (`audio/mpeg`), `POST /api/transcribe` (multipart → `{"text": ...}`), `GET /api/models` (chat-capable proxy models), `POST /api/chat` (streaming `text/plain` chat completion). `RuntimeError` → 500 (config), `openai.OpenAIError` → 502 (upstream). Note: `/api/chat` errors raised mid-stream are emitted inline as `[upstream error] ...` since headers are already sent.
+- [app/main.py](app/main.py) — FastAPI routes. `/health`, `/` (serves [app/static/index.html](app/static/index.html)), `POST /api/tts` (`audio/mpeg`), `POST /api/transcribe` (multipart → `{"text": ...}`), `GET /api/models` (chat-capable proxy models), `POST /api/chat` (streaming `text/plain` chat completion), `POST /api/decisions` (Decisions API, JSON). `RuntimeError` → 500 (config), `openai.OpenAIError` → 502 (upstream). Note: `/api/chat` errors raised mid-stream are emitted inline as `[upstream error] ...` since headers are already sent.
 - [app/audio.py](app/audio.py) — `synthesize_speech` / `transcribe_audio`. Builds `openai.OpenAI` per-call from settings; raises `RuntimeError` if `OPENAI_API_KEY` or `OPENAI_BASE_URL` missing.
 - [app/chat.py](app/chat.py) — `list_chat_models()` (filters out audio models by name hints) and `stream_chat()` (generator yielding text deltas from `chat.completions.create(stream=True)`).
+- [app/decisions.py](app/decisions.py) — `make_decisions()` calls `client.decisions.create` (OpenAI SDK v3) with `OPENAI_DECISIONS_MODEL` and returns the response as a dict.
 - [app/config.py](app/config.py) — `pydantic-settings` `Settings` loaded from `.env`. `get_settings()` is `lru_cache`'d — tests must `cache_clear()` or monkeypatch `get_settings` directly when changing env.
-- [app/static/index.html](app/static/index.html) — Self-contained tabbed frontend (Chat / Speech / Transcribe), no build step. Chat tab loads model list from `/api/models`, streams `/api/chat` via `response.body.getReader()`, maintains `conversation` array client-side.
+- [app/static/index.html](app/static/index.html) — Self-contained tabbed frontend (Chat / Speech / Transcribe / Decisions), no build step. Chat tab loads model list from `/api/models`, streams `/api/chat` via `response.body.getReader()`, maintains `conversation` array client-side.
 
 The OpenAI client is OpenAI-SDK-compatible against any base URL — `OPENAI_BASE_URL` points at LiteLLM/Azure, models are configurable via `OPENAI_TTS_MODEL` / `OPENAI_TRANSCRIBE_MODEL`.
 

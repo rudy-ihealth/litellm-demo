@@ -199,6 +199,38 @@
         line-height: 1.55;
       }
 
+      .decisions-questions {
+        min-height: 260px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.85rem;
+      }
+
+      .decisions-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.95rem;
+      }
+
+      .decisions-table th,
+      .decisions-table td {
+        text-align: left;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+      }
+
+      .decisions-table th {
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .decisions-raw {
+        margin: 0;
+        white-space: pre-wrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.8rem;
+      }
+
       .audio-grid {
         display: grid;
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -329,8 +361,9 @@
         <p class="eyebrow">LiteLLM Playground</p>
         <h1>Model tools</h1>
         <p class="lead">
-          Chat with the proxy's text models, generate MP3 speech, and transcribe audio — all
-          through the same OpenAI-compatible LiteLLM endpoint.
+          Chat with the proxy's text models, generate MP3 speech, transcribe audio, and ask
+          the Decisions API structured questions — all through the same OpenAI-compatible
+          LiteLLM endpoint.
         </p>
       </section>
 
@@ -338,6 +371,7 @@
         <button type="button" class="tab active" data-tab="chat" role="tab">Chat</button>
         <button type="button" class="tab" data-tab="speech" role="tab">Speech</button>
         <button type="button" class="tab" data-tab="transcribe" role="tab">Transcribe</button>
+        <button type="button" class="tab" data-tab="decisions" role="tab">Decisions</button>
       </nav>
 
       <section class="panel" id="panel-chat" role="tabpanel">
@@ -418,6 +452,37 @@
           </section>
         </form>
       </section>
+
+      <section class="panel" id="panel-decisions" role="tabpanel" hidden>
+        <form class="tool-form" id="decisions-form">
+          <label>
+            <span class="label-text">Input (the text every question is asked about)</span>
+            <textarea id="decisions-input" required>Hi nurse, my blood pressure this morning was 182/110 and I have a pounding headache since I woke up. I took my Valsartan as usual. Should I come in?</textarea>
+          </label>
+
+          <label>
+            <span class="label-text">Questions (JSON: predicate, choice or score)</span>
+            <textarea id="decisions-questions" class="decisions-questions" required spellcheck="false"></textarea>
+          </label>
+
+          <button id="decisions-submit" type="submit">Ask</button>
+          <p class="status" id="decisions-status"></p>
+
+          <section class="transcript" id="decisions-result" hidden>
+            <span class="label-text">Answers</span>
+            <table class="decisions-table">
+              <thead>
+                <tr><th>Question</th><th>Type</th><th>Answer</th><th>Confidence</th></tr>
+              </thead>
+              <tbody id="decisions-answers"></tbody>
+            </table>
+            <details>
+              <summary>Raw response</summary>
+              <pre class="decisions-raw" id="decisions-raw"></pre>
+            </details>
+          </section>
+        </form>
+      </section>
     </main>
 
     <script>
@@ -427,6 +492,7 @@
         chat: document.getElementById("panel-chat"),
         speech: document.getElementById("panel-speech"),
         transcribe: document.getElementById("panel-transcribe"),
+        decisions: document.getElementById("panel-decisions"),
       };
 
       tabs.forEach((tab) => {
@@ -641,6 +707,102 @@
           transcribeStatus.textContent = error.message;
         } finally {
           transcribeButton.disabled = false;
+        }
+      });
+
+      // -------- decisions --------
+      const decisionsForm = document.getElementById("decisions-form");
+      const decisionsButton = document.getElementById("decisions-submit");
+      const decisionsStatus = document.getElementById("decisions-status");
+      const decisionsResult = document.getElementById("decisions-result");
+      const decisionsAnswers = document.getElementById("decisions-answers");
+      const decisionsRaw = document.getElementById("decisions-raw");
+
+      document.getElementById("decisions-questions").value = JSON.stringify(
+        [
+          {
+            type: "predicate",
+            name: "needs_same_day_escalation",
+            instructions: "Does this message describe a situation that a nurse should escalate to a clinician today?",
+          },
+          {
+            type: "choice",
+            name: "topic",
+            instructions: "What is the main topic of the message?",
+            choices: [
+              { value: "blood_pressure", description: "Blood pressure readings or symptoms of high/low BP" },
+              { value: "blood_glucose", description: "Blood sugar readings or diabetes symptoms" },
+              { value: "medication_refill", description: "Asking for a refill or running out of medicine" },
+              { value: "appointment", description: "Booking, moving or cancelling a visit" },
+              { value: "other", description: "Anything else" },
+            ],
+          },
+          {
+            type: "score",
+            name: "urgency",
+            instructions: "How urgent is this message for the care team?",
+            levels: [
+              { label: "routine", description: "Can wait for the next working day" },
+              { label: "soon", description: "Should be answered within a few hours" },
+              { label: "urgent", description: "Needs attention right away" },
+            ],
+          },
+        ],
+        null,
+        2,
+      );
+
+      function describeAnswer(answer) {
+        if (answer.type === "predicate") return `yes probability ${answer.probability}`;
+        if (answer.type === "choice") return answer.choice;
+        if (answer.type === "score") {
+          const top = [...answer.probabilities].sort((a, b) => b.probability - a.probability)[0];
+          return `${answer.score} (most likely: ${top.label})`;
+        }
+        return answer.type;
+      }
+
+      decisionsForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        decisionsButton.disabled = true;
+        decisionsResult.hidden = true;
+        decisionsStatus.textContent = "Asking...";
+
+        try {
+          const questions = JSON.parse(document.getElementById("decisions-questions").value);
+          const response = await fetch("/api/decisions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              input: document.getElementById("decisions-input").value,
+              questions,
+            }),
+          });
+
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({ detail: "Request failed." }));
+            throw new Error(typeof error.detail === "string" ? error.detail : JSON.stringify(error.detail));
+          }
+
+          const data = await response.json();
+          decisionsAnswers.replaceChildren(
+            ...data.answers.map((answer) => {
+              const row = document.createElement("tr");
+              for (const value of [answer.name ?? "", answer.type, describeAnswer(answer), answer.confidence ?? ""]) {
+                const cell = document.createElement("td");
+                cell.textContent = value;
+                row.appendChild(cell);
+              }
+              return row;
+            }),
+          );
+          decisionsRaw.textContent = JSON.stringify(data, null, 2);
+          decisionsResult.hidden = false;
+          decisionsStatus.textContent = `Answered by ${data.model}.`;
+        } catch (error) {
+          decisionsStatus.textContent = error.message;
+        } finally {
+          decisionsButton.disabled = false;
         }
       });
     </script>

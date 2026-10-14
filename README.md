@@ -1,6 +1,6 @@
 # LiteLLM Playground
 
-Small FastAPI app that uses `openai.OpenAI` against a LiteLLM/OpenAI-compatible endpoint and serves a tabbed browser UI for chat (streaming), text-to-speech, and audio transcription.
+Small FastAPI app that uses `openai.OpenAI` against a LiteLLM/OpenAI-compatible endpoint and serves a tabbed browser UI for chat (streaming), text-to-speech, audio transcription, and the Decisions API.
 
 ![LiteLLM Playground — chat tab streaming a reply from claude-haiku-4-5](docs/test-webpage.png)
 
@@ -29,7 +29,10 @@ OPENAI_API_KEY=your-real-key
 OPENAI_BASE_URL=https://your-litellm-host
 OPENAI_TTS_MODEL=gpt-4o-mini-tts
 OPENAI_TRANSCRIBE_MODEL=gpt-4o-transcribe
+OPENAI_DECISIONS_MODEL=gpt-6-luna-openai
 ```
+
+`OPENAI_DECISIONS_MODEL` must be a LiteLLM model whose provider supports the Decisions API (for example `openai/gpt-6-luna`). An Azure OpenAI deployment returns `Unknown Decisions provider 'azure'`.
 
 
 ## Run locally with uv
@@ -171,6 +174,72 @@ response = client.audio.transcriptions.create(
 print(response.text)
 ```
 
+![LiteLLM Playground — Decisions tab answering three questions about a patient message with gpt-6-luna](docs/decisions-tab.png)
+
+Decisions API (needs the OpenAI Python SDK v3, `openai>=3.31.0`, and LiteLLM v1.104.2 or later). Each question is a
+`predicate` (yes/no → `probability`), a `choice` (pick one of `choices` → `choice`, `probabilities`, `confidence`) or a
+`score` (rank on 2–10 `levels`, lowest first → `score` as the expected level, `probabilities`, `confidence`):
+
+```python
+import os
+import openai
+
+client = openai.OpenAI(
+    api_key="your-real-key",
+    base_url=os.environ["OPENAI_BASE_URL"],
+)
+
+response = client.decisions.create(
+    model="gpt-6-luna-openai",
+    input="Hi nurse, my blood pressure this morning was 182/110 and I have a pounding headache. Should I come in?",
+    questions=[
+        {
+            "type": "predicate",
+            "name": "needs_same_day_escalation",
+            "instructions": "Does this message describe a situation that a nurse should escalate to a clinician today?",
+        },
+        {
+            "type": "choice",
+            "name": "topic",
+            "instructions": "What is the main topic of the message?",
+            "choices": [
+                {"value": "blood_pressure"},
+                {"value": "blood_glucose"},
+                {"value": "medication_refill"},
+                {"value": "other"},
+            ],
+        },
+        {
+            "type": "score",
+            "name": "urgency",
+            "instructions": "How urgent is this message for the care team?",
+            "levels": [{"label": "routine"}, {"label": "soon"}, {"label": "urgent"}],
+        },
+    ],
+)
+
+for answer in response.answers:
+    print(answer.name, answer.type, answer.model_dump(exclude_none=True))
+```
+
+The same call with `curl`, plus LiteLLM's System One format (`/v1/systemone`: `state` instead of `input`, questions as a
+named map, `noul` instead of `predicate`, and `criteria` for choices and levels):
+
+```bash
+curl -s "$OPENAI_BASE_URL/v1/decisions" \
+  -H "Authorization: Bearer $OPENAI_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model": "gpt-6-luna-openai",
+       "input": "Can I move my Thursday check-in call to Friday afternoon?",
+       "questions": [{"type": "predicate", "name": "is_reschedule", "instructions": "Is the patient asking to move an appointment?"}]}'
+
+curl -s "$OPENAI_BASE_URL/v1/systemone" \
+  -H "Authorization: Bearer $OPENAI_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model": "gpt-6-luna-openai",
+       "state": "Can I move my Thursday check-in call to Friday afternoon?",
+       "questions": {"is_reschedule": {"type": "noul", "instructions": "Is the patient asking to move an appointment?"},
+                     "urgency": {"type": "score", "criteria": ["Routine", "Soon", "Urgent"]}}}'
+```
+
 ## Endpoints
 
 | Method | Path | Returns |
@@ -180,9 +249,10 @@ print(response.text)
 | POST | `/api/chat` | streaming `text/plain` deltas; body `{"model","messages":[{"role","content"}]}` |
 | POST | `/api/tts` | MP3 bytes; body `{"text","voice"}` |
 | POST | `/api/transcribe` | `{"text": ...}`; multipart `file` upload |
+| POST | `/api/decisions` | `{"model", "answers": [...]}`; body `{"input", "questions": [...]}` (1–128 questions) |
 
 ## Notes
 
-- The frontend is a single static page with three tabs (Chat / Speech / Transcribe).
+- The frontend is a single static page with four tabs (Chat / Speech / Transcribe / Decisions). The Decisions tab is prefilled with a sample patient message and three questions; edit the JSON to try your own.
 - Chat streams via `response.body.getReader()` against `/api/chat`. Conversation history is kept client-side.
 - OpenAI's current text-to-speech docs show `gpt-4o-mini-tts` on the speech endpoint and list `alloy` among the supported voices.

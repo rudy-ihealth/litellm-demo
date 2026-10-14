@@ -26,6 +26,7 @@ def test_index_serves_playground() -> None:
     assert 'data-tab="chat"' in body
     assert 'data-tab="speech"' in body
     assert 'data-tab="transcribe"' in body
+    assert 'data-tab="decisions"' in body
 
 
 def test_tts_endpoint_returns_audio_bytes(monkeypatch) -> None:
@@ -114,5 +115,32 @@ def test_chat_endpoint_rejects_invalid_role() -> None:
             "messages": [{"role": "bogus", "content": "hi"}],
         },
     )
+
+    assert response.status_code == 422
+
+
+def test_decisions_endpoint_returns_answers(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_make_decisions(*, text: str, questions: list[dict[str, object]]) -> dict[str, object]:
+        captured["text"] = text
+        captured["questions"] = questions
+        return {"model": "gpt-6-luna", "answers": [{"type": "predicate", "name": "q", "probability": 0.9}]}
+
+    monkeypatch.setattr(main, "make_decisions", fake_make_decisions)
+    client = TestClient(app)
+    questions = [{"type": "predicate", "name": "q", "instructions": "Is it urgent?"}]
+
+    response = client.post("/api/decisions", json={"input": "BP 182/110", "questions": questions})
+
+    assert response.status_code == 200
+    assert response.json()["answers"][0]["probability"] == 0.9
+    assert captured == {"text": "BP 182/110", "questions": questions}
+
+
+def test_decisions_endpoint_rejects_empty_questions() -> None:
+    client = TestClient(app)
+
+    response = client.post("/api/decisions", json={"input": "hi", "questions": []})
 
     assert response.status_code == 422

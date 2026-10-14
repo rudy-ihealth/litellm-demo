@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import openai
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.audio import synthesize_speech, transcribe_audio
 from app.chat import list_chat_models, stream_chat
+from app.decisions import make_decisions
 
 app = FastAPI()
 STATIC_DIR = Path(__file__).parent / "static"
@@ -26,6 +27,11 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     model: str = Field(min_length=1)
     messages: list[ChatMessage] = Field(min_length=1)
+
+
+class DecisionsRequest(BaseModel):
+    input: str = Field(min_length=1)
+    questions: list[dict[str, Any]] = Field(min_length=1, max_length=128)
 
 
 @app.get("/health")
@@ -95,3 +101,13 @@ def create_chat(payload: ChatRequest) -> StreamingResponse:
             yield f"\n[upstream error] {exc}"
 
     return StreamingResponse(generator(), media_type="text/plain; charset=utf-8")
+
+
+@app.post("/api/decisions")
+def create_decisions(payload: DecisionsRequest) -> dict[str, Any]:
+    try:
+        return make_decisions(text=payload.input, questions=payload.questions)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except openai.OpenAIError as exc:
+        raise HTTPException(status_code=502, detail=f"Decisions request failed: {exc}") from exc
